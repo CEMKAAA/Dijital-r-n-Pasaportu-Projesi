@@ -9,8 +9,8 @@ Dosyaları aşağıdaki sırayla okuyabilirsin.
 Uygulama CSV'deki ürün bilgilerini doğrulayacak, geçerli kayıtları SQLite'a
 yazacak ve her GTIN için okunabilir HTML, JSON-LD ve PNG QR kodu sunacak.
 
-Şu anda veritabanı, alan doğrulaması ve CSV içe aktarma API'si tamamlandı.
-Pasaport endpoint'leri sonraki aşamada eklenecek.
+Şu anda veritabanı, alan doğrulaması, CSV içe aktarma, HTML/JSON-LD pasaportları
+ve PNG QR kodu tamamlandı. Yükleme ekranı sonraki aşamada eklenecek.
 
 ## 2. Üç sınıf arasındaki ilişki
 
@@ -80,7 +80,8 @@ Dosya: [Program.cs](../src/MiniDpp.Api/Program.cs).
 8. Başlangıçtaki scope içerisinde `MigrateAsync`, bekleyen migration'ları uygular.
 9. `MapGet`, `/health` adresinin cevabını tanımlar.
 10. `MapImportEndpoints`, CSV yükleme endpoint'ini ekler.
-11. `RunAsync`, sunucuyu çalıştırır.
+11. `MapDppEndpoints`, HTML, JSON-LD ve QR endpoint'lerini ekler.
+12. `RunAsync`, sunucuyu çalıştırır.
 
 **ÖNEMLİ:** Hizmet kayıtları `Build()` çağrısından önce yapılır.
 
@@ -318,7 +319,117 @@ bu veritabanına uygulanır; uygulamanın yerel dosyasına dokunulmaz.
   Model ve partinin de geri alındığı ve sonraki ürünün kaydedildiği doğrulanır.
 - Eksik dosya, hatalı başlık, fazla boyut ve geçersiz UTF-8 kontrol edilir.
 
-## 15. Görüşmede açıklayabilmen gerekenler
+## 15. Pasaport verisi ve görünürlük ayrımı
+
+Dosyalar: [PassportService.cs](../src/MiniDpp.Api/Passports/PassportService.cs),
+[ProductPassport.cs](../src/MiniDpp.Api/Passports/ProductPassport.cs),
+[DppEndpoints.cs](../src/MiniDpp.Api/Endpoints/DppEndpoints.cs).
+
+Endpoint, `rol` parametresinin tam olarak `yetkili` olup olmadığını kontrol eder.
+Bu bilgi `PassportService.GetAsync` metoduna `includeCarbon` olarak gider.
+
+Hizmet, veritabanı entity'sini doğrudan döndürmek yerine `Select` ile bir
+`ProductPassport` nesnesi oluşturur. Bu sorguda ilişkili parti ve model
+alanlarına erişmek, EF Core'un gerekli bağlantıları SQL'de kurmasını sağlar.
+`AsNoTracking`, okuma sorgusunun kayıt değiştirme amacı taşımadığını belirtir.
+
+**ÖNEMLİ:** Tüketici görünümünde `CarbonKgCo2e` alanı bu nesnede null olur.
+Karbon değeri HTML şablonuna veya JSON-LD oluşturucusuna aktarılmaz.
+Gizleme kararı CSS'e, JavaScript'e veya tarayıcıya bırakılmaz.
+
+`ProductPassport.GetProperties`, iki çıktının da kullanacağı alan listesini
+oluşturur. Karbon yalnızca bir değeri varsa bu listeye eklenir. `HasValue`
+kontrolü sayesinde 0 değeri de yetkili görünümünde korunur.
+
+Demo rolü gerçek kullanıcı hesabına bağlı değildir. Ödevin kapsamı gereği
+görünüm URL parametresiyle seçilir.
+
+## 16. HTML neden metinleri kodluyor?
+
+Dosya: [PassportHtmlRenderer.cs](../src/MiniDpp.Api/Passports/PassportHtmlRenderer.cs).
+
+Oluşturucu, ortak alan listesini `<dl>`, `<dt>` ve `<dd>` etiketleriyle gösterir.
+JSON-LD ve QR bağlantılarını da ekler. Yetkili görünümünden JSON-LD'ye giden
+bağlantı rol parametresini korur.
+
+**ÖNEMLİ:** CSV'den gelen metinler HTML'e yazılmadan önce `HtmlEncoder` ile
+kodlanır. Örneğin `<script>` metni bir HTML etiketi olarak çalıştırılmak yerine
+sayfada metin olarak görünür. Başlık, alan değerleri ve bağlantı özelliklerinde
+bu kurala uyulur.
+
+CSS dosyası `wwwroot/styles.css` içindedir ve `UseStaticFiles` ile sunulur.
+Sayfanın mobil düzeni CSS media query ile tek sütuna geçer.
+
+## 17. JSON-LD nasıl oluşturuluyor?
+
+Dosya: [PassportJsonLdRenderer.cs](../src/MiniDpp.Api/Passports/PassportJsonLdRenderer.cs).
+
+JSON-LD, JSON verisine alanların anlamını belirten bir bağlam ekler:
+
+- `@context`: `https://schema.org`
+- `@type`: `Product`
+- `@id` ve `url`: Ürünün kalıcı tüketici pasaportu adresi
+- `name`: Model adı
+- `gtin14`: Baştaki sıfırları korunmuş GTIN metni
+- `material`: Elyaf bileşiminin okunabilir açıklaması
+- `additionalProperty`: Ortak listedeki ürün özellikleri
+
+Ek alanların her biri `PropertyValue` yapısındadır. `propertyID`, CSV alanına
+karşılık gelen kimliktir; `name` etikettir; `value` asıl değerdir. Birim varsa
+`unitText` eklenir. Sayısal değerlerin `object` alanında tutulması onları
+metne dönüştürmez; JSON serileştiricisi gerçek `decimal` değerini sayı olarak yazar.
+
+**ÖNEMLİ:** Karbon için ayrı bir JSON gizleme kuralı yazmıyoruz. Alan ortak
+listede yoksa JSON-LD'de de bulunmaz. Böylece iki görünüm aynı kurala dayanır.
+
+Kaynaklar: [Product](https://schema.org/Product),
+[PropertyValue](https://schema.org/PropertyValue).
+
+## 18. QR hedefi ve yapılandırma
+
+Dosyalar: [DppOptions.cs](../src/MiniDpp.Api/Passports/DppOptions.cs),
+[PassportUrlBuilder.cs](../src/MiniDpp.Api/Passports/PassportUrlBuilder.cs),
+[QrCodeService.cs](../src/MiniDpp.Api/Passports/QrCodeService.cs).
+
+`DppOptions`, `Dpp:PublicBaseUrl` ayarını taşır. `ValidateOnStart`, geçersiz
+adresle sunucu çalışmaya başlamasını engeller. Kök HTTP/HTTPS adresi beklenir.
+
+`PassportUrlBuilder`, bütün pasaport bağlantılarının yolunu tek yerde oluşturur.
+Kalıcı URL, ayarlanan sunucu adresi ile GTIN yolunun birleştirilmesidir.
+
+**ÖNEMLİ:** QR hedefi `HtmlUrl` ile oluşturulur ve rol parametresi içermez.
+Yetkili görünümündeki QR da tüketici pasaportunu açar. Hedef adresi, isteğin
+değiştirilebilir `Host` başlığından alınmaz.
+
+QRCoder, URL metnini QR verisine çevirir. `ECCLevel.Q`, hata düzeltme seviyesini
+seçer. `PngByteQRCode.GetGraphic(8)`, modül boyutu 8 piksel olan PNG baytlarını
+üretir. `Results.File`, bunları `image/png` olarak HTTP yanıtına yazar.
+Tarayıcıdaki `download` özelliği, bağlantıya tıklanınca PNG indirilmesini ister.
+
+Uygulamanın çalışması için Python veya harici QR servisi gerekmez.
+
+## 19. Pasaport testleri neleri doğruluyor?
+
+Dosyalar: [PassportApiTests.cs](../tests/MiniDpp.Tests/PassportApiTests.cs),
+[DppOptionsTests.cs](../tests/MiniDpp.Tests/DppOptionsTests.cs).
+
+- Örnek dosyadaki üç geçerli ürünün HTML ve JSON-LD alanları karşılaştırılır.
+- Tüketici görünümünde karbon etiketi ve değeri iki yanıtta da bulunmaz.
+- Yetkili görünümünde karbon ve birimi iki yanıtta da vardır; 0 değeri de korunur.
+- Geçersiz roller tüketici görünümünü kullanır.
+- Kayıtsız veya bozuk GTIN için 404 döner.
+- CSV'deki HTML etiketleri çalışabilir işaretleme hâlinde sunulmaz.
+- JSON-LD içerik türü, PNG imzası ve CSS erişimi kontrol edilir.
+- QR yanıtı rol parametresinden etkilenmez.
+- İsteğin `Host` başlığı değiştirilse bile kalıcı adres yapılandırmadan alınır.
+
+Ek yerel kontrolde üç PNG QR kodu bir QR okuyucu ile çözümlendi ve her
+birinin doğru tüketici URL'sini içerdiği doğrulandı.
+
+HTML'deki `98.0` ile JSON'daki `98`, aynı sayısal değeri temsil eder.
+Karşılaştırma testleri sayıların yazımını değil, değer ve birim eşitliğini denetler.
+
+## 20. Görüşmede açıklayabilmen gerekenler
 
 - GTIN neden sayısal tür yerine metin olarak saklanıyor?
 - Model ve parti neden ayrı tablolar? Bağlantı hangi alanlarda tutuluyor?
@@ -332,3 +443,8 @@ bu veritabanına uygulanır; uygulamanın yerel dosyasına dokunulmaz.
 - Bir satırın kayıt hatası neden bütün dosyayı geri almıyor?
 - Transaction geri alınınca neden `ChangeTracker.Clear` çağrılıyor?
 - Aynı GTIN tekrar veya farklı bilgilerle gelirse ne oluyor?
+- Karbon alanı iki çıktıdan aynı kuralla nasıl kaldırılıyor?
+- Sıfır karbon değeri neden görünürlük kontrolünde kaybolmuyor?
+- JSON-LD'deki `@context`, `@type` ve `PropertyValue` ne işe yarıyor?
+- CSV'den gelen metinler HTML'e neden doğrudan yazılmıyor?
+- QR neden tüketici adresini içeriyor ve neden sunucu adresi ayardan okunuyor?

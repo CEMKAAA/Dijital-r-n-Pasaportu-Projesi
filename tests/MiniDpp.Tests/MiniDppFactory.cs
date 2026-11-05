@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using MiniDpp.Api.Data;
+using MiniDpp.Api.Passports;
 
 namespace MiniDpp.Tests;
 
@@ -29,6 +30,7 @@ internal sealed class MiniDppFactory : WebApplicationFactory<Program>
             services.RemoveAll<DbContextOptions<AppDbContext>>();
             services.RemoveAll<IDbContextOptionsConfiguration<AppDbContext>>();
             services.AddDbContext<AppDbContext>(options => options.UseSqlite(_connection));
+            services.PostConfigure<DppOptions>(options => options.PublicBaseUrl = "http://localhost");
         });
     }
 

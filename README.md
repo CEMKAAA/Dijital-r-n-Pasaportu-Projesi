@@ -7,8 +7,8 @@ ASP.NET Core (.NET 10), Entity Framework Core ve SQLite ile geliştirilen teknik
 1. **Tamamlandı - veritabanı ve test altyapısı:** Model, üretim partisi ve ürün tabloları; ilişkiler, benzersizlik kuralları ve ilk migration.
 2. **Tamamlandı - alan doğrulaması:** GS1 kontrol basamağı, zorunlu alanlar, yüzdeler ve karbon değeri.
 3. **Tamamlandı - CSV içe aktarma API'si:** Satır numaralı hata raporu, satır başına transaction ve tekrar yükleme kontrolü.
-4. Sıradaki aşama: HTML, JSON-LD, görünürlük ayrımı ve PNG QR kodu.
-5. Yükleme ekranı ve uçtan uca kontroller.
+4. **Tamamlandı - ürün pasaportları:** HTML, JSON-LD, görünürlük ayrımı ve PNG QR kodu.
+5. Sıradaki aşama: Yükleme ekranı ve son teslim kontrolleri.
 
 Tamamlanan kodu okumak ve görüşmeye hazırlanmak için [adım adım kod rehberine](docs/KOD_REHBERI.md) bakın.
 
@@ -143,3 +143,50 @@ başlangıç satırı raporlanır. Sayaçlarda `importedCount + unchangedCount +
 | Dosya 1 MiB sınırını aşıyor | 413 |
 
 Dosya düzeyindeki hatalar `application/problem+json` biçiminde döner.
+
+## Ürün pasaportları ve QR kodu
+
+CSV içe aktarıldıktan sonra örnek adresler:
+
+| Çıktı | Adres |
+|---|---|
+| Tüketici HTML | <http://localhost:5100/dpp/08690000000012> |
+| Yetkili HTML | <http://localhost:5100/dpp/08690000000012?rol=yetkili> |
+| Tüketici JSON-LD | <http://localhost:5100/dpp/08690000000012.jsonld> |
+| Yetkili JSON-LD | <http://localhost:5100/dpp/08690000000012.jsonld?rol=yetkili> |
+| PNG QR | <http://localhost:5100/dpp/08690000000012/qr.png> |
+
+- Her geçerli GTIN aynı adres yapısıyla açılır.
+- Kayıtsız veya biçimi geçersiz GTIN için 404 döner.
+- HTML'deki görünüm bağlantısı ile tüketici ve yetkili görünümleri arasında geçilebilir.
+- Varsayılan görünümde karbon alanı HTML'e veya JSON-LD'ye eklenmez.
+- Yalnızca `rol=yetkili`, iki çıktıya da karbon alanını ekler. Sıfır karbon değeri de gösterilir.
+- Tanınmayan veya yinelenen rol değerlerinde tüketici görünümü kullanılır.
+- Rol seçimi, ödevde istenen demo görünüm ayrımıdır; kullanıcı hesabı/oturum doğrulaması uygulanmaz.
+- Pasaport yanıtları `Cache-Control: no-store` başlığıyla döner.
+
+JSON-LD yanıtının içerik türü `application/ld+json` ve temel tipi
+[schema.org/Product](https://schema.org/Product)'tır. GTIN, `gtin14` alanında metin
+olarak; diğer özellikler `additionalProperty` içinde `PropertyValue` olarak
+sunulur. Sayısal değerler JSON'da sayı türündedir ve birimleri `unitText` ile belirtilir.
+HTML ve JSON-LD aynı alan listesini kullanır.
+
+QR kodu sunucuda QRCoder ile üretilir ve `image/png` olarak döner.
+Pasaport sayfasından PNG olarak indirilebilir. QR hedefi, yetkili sayfasında
+üretilse bile her zaman **tüketici HTML adresidir**; rol parametresi içermez.
+
+### QR hedef adresi
+
+`appsettings.json` içindeki `Dpp:PublicBaseUrl`, kalıcı pasaport ve QR hedefinin
+adresini belirler. Varsayılan `http://localhost:5100` değeridir. İstekten gelen
+`Host` başlığı bu adresin yerine kullanılmaz.
+
+Farklı portta örnek çalıştırma:
+
+```powershell
+dotnet run --project .\src\MiniDpp.Api --no-launch-profile -- --urls http://localhost:5110 --Dpp:PublicBaseUrl http://localhost:5110
+```
+
+Adres, yol veya sorgu içermeyen kök bir HTTP/HTTPS adresi olmalıdır.
+QR'ı başka bir cihazda açmak için bu ayar, o cihazın erişebildiği sunucu
+adresini göstermelidir. `localhost`, QR'ı okuyan cihazın kendisini belirtir.
