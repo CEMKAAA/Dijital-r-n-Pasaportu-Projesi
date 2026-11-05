@@ -13,6 +13,16 @@ public sealed class PassportService
         _database = database;
     }
 
+    public async Task<IReadOnlyList<ProductSummary>> GetSummariesAsync(
+        CancellationToken cancellationToken = default) =>
+        await _database.Products.AsNoTracking()
+            .OrderBy(product => product.ProductBatch.ProductModel.Name)
+            .ThenBy(product => product.Gtin)
+            .Select(product => new ProductSummary(
+                product.Gtin, product.ProductBatch.ProductModel.Name,
+                product.ProductBatch.BatchNumber, product.ProductionLocation))
+            .ToListAsync(cancellationToken);
+
     public async Task<ProductPassport?> GetAsync(
         string gtin, bool includeCarbon, CancellationToken cancellationToken = default)
     {

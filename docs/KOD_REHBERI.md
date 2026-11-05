@@ -1,6 +1,6 @@
 # Mini DPP: Adım adım kod rehberi
 
-Bu rehber, tamamlanan geliştirme aşamalarıyla birlikte güncellenir.
+Bu rehber uygulamanın tamamını, geliştirdiğimiz sırayla açıklar.
 Koddaki **ÖNEMLİ** yorumları, özellikle açıklayabilmen gereken kararları işaretler.
 Dosyaları aşağıdaki sırayla okuyabilirsin.
 
@@ -9,8 +9,9 @@ Dosyaları aşağıdaki sırayla okuyabilirsin.
 Uygulama CSV'deki ürün bilgilerini doğrulayacak, geçerli kayıtları SQLite'a
 yazacak ve her GTIN için okunabilir HTML, JSON-LD ve PNG QR kodu sunacak.
 
-Şu anda veritabanı, alan doğrulaması, CSV içe aktarma, HTML/JSON-LD pasaportları
-ve PNG QR kodu tamamlandı. Yükleme ekranı sonraki aşamada eklenecek.
+Veritabanı, alan doğrulaması, CSV içe aktarma, HTML/JSON-LD pasaportları,
+PNG QR kodu ve yükleme ekranı tamamlandı. Teknik kontrollerin sonuçları
+[kapsam kontrolünde](KAPSAM_KONTROLU.md) bulunur.
 
 ## 2. Üç sınıf arasındaki ilişki
 
@@ -81,7 +82,8 @@ Dosya: [Program.cs](../src/MiniDpp.Api/Program.cs).
 9. `MapGet`, `/health` adresinin cevabını tanımlar.
 10. `MapImportEndpoints`, CSV yükleme endpoint'ini ekler.
 11. `MapDppEndpoints`, HTML, JSON-LD ve QR endpoint'lerini ekler.
-12. `RunAsync`, sunucuyu çalıştırır.
+12. `MapHomeEndpoints`, ana sayfa, örnek dosya ve ürün listesi endpoint'lerini ekler.
+13. `RunAsync`, sunucuyu çalıştırır.
 
 **ÖNEMLİ:** Hizmet kayıtları `Build()` çağrısından önce yapılır.
 
@@ -359,6 +361,8 @@ bu kurala uyulur.
 
 CSS dosyası `wwwroot/styles.css` içindedir ve `UseStaticFiles` ile sunulur.
 Sayfanın mobil düzeni CSS media query ile tek sütuna geçer.
+Ortak sayfa iskeleti `Web/HtmlLayout.cs` içerisindedir; başlık, stil dosyası,
+ana sayfa bağlantısı ve footer orada üretilir.
 
 ## 17. JSON-LD nasıl oluşturuluyor?
 
@@ -429,7 +433,89 @@ birinin doğru tüketici URL'sini içerdiği doğrulandı.
 HTML'deki `98.0` ile JSON'daki `98`, aynı sayısal değeri temsil eder.
 Karşılaştırma testleri sayıların yazımını değil, değer ve birim eşitliğini denetler.
 
-## 20. Görüşmede açıklayabilmen gerekenler
+## 20. Ana sayfa ve özet ürün listesi
+
+Dosyalar: [HomeEndpoints.cs](../src/MiniDpp.Api/Endpoints/HomeEndpoints.cs),
+[HomePageRenderer.cs](../src/MiniDpp.Api/Web/HomePageRenderer.cs),
+[HtmlLayout.cs](../src/MiniDpp.Api/Web/HtmlLayout.cs),
+[ProductSummary.cs](../src/MiniDpp.Api/Passports/ProductSummary.cs).
+
+Ana sayfa isteğinde ürünler veritabanından okunur ve başlangıç tablosu sunucuda
+HTML olarak oluşturulur. Bu yüzden ilk listeyi görmek için ayrı bir JavaScript
+isteğinin tamamlanması gerekmez.
+
+`ProductSummary`, listeye yalnızca GTIN, model, parti ve yer bilgisini taşır.
+`GET /api/products`, yükleme sonrasında tablonun yenilenmesini sağlar.
+Karbon bu veri yapısında bulunmaz.
+
+Formun `action`, `method`, `enctype` ve `name="file"` alanları, daha önce
+yazdığımız yükleme API'siyle eşleşir. JavaScript açıkken sonuç aynı sayfada
+gösterilir; kapalıysa form doğrudan API'nin JSON yanıtını açabilir.
+
+Örnek CSV, proje dosyasındaki `Content` girdisiyle build ve publish çıktısına
+kopyalanır. `AppContext.BaseDirectory`, çalıştırılan uygulamanın bu dosyayı
+bulmasını sağlar. Kaynak geliştirme klasörüne bağımlı bir indirme yolu kullanılmaz.
+
+## 21. Tarayıcı HTTP istemcisi
+
+Dosya: [import-client.js](../src/MiniDpp.Api/wwwroot/import-client.js).
+
+`validateFile`, dosya seçimi, boşluk ve boyut kontrollerini kullanıcıya erken
+bildirir. Sunucu aynı kontrolleri bağımsız olarak uygular.
+
+`uploadCsv`, `FormData` oluşturup dosyayı `file` anahtarıyla ekler.
+`fetch`, bunu POST isteğiyle gönderir. `Content-Type` elle verilmez; multipart
+boundary bilgisini tarayıcı oluşturur.
+
+`readJson`, başarılı yanıtı veri olarak; başarısız yanıtı anlaşılır bir `Error`
+olarak döndürür. Dosya hatasının `detail` alanı ekrana ulaşır. Ağ hatası ile
+satır bazlı doğrulama hatası farklı akışlardır: satır hataları başarılı raporun içindedir.
+
+`getProducts`, güncel ürün listesini alır. İki fonksiyonda da istek işlevi
+parametre olarak değiştirilebilir; böylece testlerde gerçek ağa çıkmadan
+yanıt ve hata senaryoları denetlenir.
+
+## 22. Ekrandaki durumlar ve metin güvenliği
+
+Dosya: [app.js](../src/MiniDpp.Api/wwwroot/app.js).
+
+1. Formun `submit` olayı yakalanır; sayfanın doğrudan değişmesi engellenir.
+2. Seçilen dosya kontrol edilir.
+3. Buton ve dosya alanı bekleme durumuna alınır.
+4. API yanıtı, sayaçlar ve hata tablosu olarak gösterilir.
+5. Ürün listesi yeniden alınır ve güncellenir.
+6. `finally`, başarı veya hata durumunda formu yeniden kullanılabilir yapar.
+
+**ÖNEMLİ:** CSV'den gelen model, parti, yer ve hata metinleri `textContent`
+ile DOM'a yazılır. `innerHTML` kullanılmaz. Sunucudaki `HtmlEncoder` kuralının
+tarayıcı tarafındaki karşılığı budur.
+
+`createDocumentFragment`, yeni satırları bellekte bir araya getirir.
+`replaceChildren`, tablonun eski satırlarını yeni içerikle değiştirir.
+
+`uploading` ve `refreshing`, aynı ekrandaki çakışan işlemleri engeller.
+Ürün listesi yenilenemezse başarılı yükleme raporu korunur; liste hatası ayrı
+gösterilir. `aria-busy`, `role="alert"`, `role="status"` ve form etiketleri
+işlem durumunu ve hataları erişilebilir biçimde bildirir.
+
+## 23. Test ve yayımlanabilir çıktı kontrolü
+
+Dosyalar: [HomeApiTests.cs](../tests/MiniDpp.Tests/HomeApiTests.cs),
+[import-client.test.mjs](../tests/web/import-client.test.mjs).
+
+Ana sayfa testi form alanlarını, örnek CSV'nin özgün baytlarını, dosya yükleme
+sonucunu ve ürünlerin pasaport bağlantılarını birlikte denetler.
+Özet listede karbon bulunmadığı ve HTML'in kullanıcı metinlerini kodladığı kontrol edilir.
+
+JavaScript testleri Node.js'in yerleşik test modülünü kullanır; ek npm paketi
+gerektirmez. Bunlar HTTP istemci davranışı testleridir; tarayıcıda tıklama veya
+görsel düzen testi olarak değerlendirilmez.
+
+Son kontrolde Release çıktısı ayrı bir klasörde çalıştırıldı. Örnek dosya,
+yükleme, ürün listesi, pasaportlar, statik dosyalar ve QR hedefi bu çalışan
+çıktıdan doğrulandı. Uygulama yeniden başlatılarak kalıcılık ayrıca kontrol edildi.
+
+## 24. Görüşmede açıklayabilmen gerekenler
 
 - GTIN neden sayısal tür yerine metin olarak saklanıyor?
 - Model ve parti neden ayrı tablolar? Bağlantı hangi alanlarda tutuluyor?
@@ -448,3 +534,32 @@ Karşılaştırma testleri sayıların yazımını değil, değer ve birim eşit
 - JSON-LD'deki `@context`, `@type` ve `PropertyValue` ne işe yarıyor?
 - CSV'den gelen metinler HTML'e neden doğrudan yazılmıyor?
 - QR neden tüketici adresini içeriyor ve neden sunucu adresi ayardan okunuyor?
+- Tarayıcı yükleme yanıtını sayfayı değiştirmeden nasıl gösteriyor?
+- FormData'nın Content-Type başlığı neden elle oluşturulmuyor?
+- İstemcide textContent, sunucuda HtmlEncoder neden kullanılıyor?
+- Liste yenilenmesi başarısız olursa yükleme raporu neden korunuyor?
+
+## 25. Kodda sık karşılaşılan C# yapıları
+
+| Yapı | Buradaki anlamı |
+|---|---|
+| `public` / `private` | Başka sınıflara açık veya yalnızca sınıf içinde erişilebilir üye |
+| `static` | Nesne örneği oluşturmadan kullanılan üye veya sınıf |
+| `sealed` | Bu sınıftan başka sınıf türetilememesi |
+| `readonly` | Alanın tanımında veya yapıcı metotta atanması |
+| `record` | Verileri özlü biçimde taşıyan tür; testlerde `with` ile kopyalanır |
+| `DbSet<Product>` | Generic türün ürün sınıfıyla kullanılması |
+| `product => product.Gtin` | Bir nesneden ilgili alanı seçen lambda ifadesi |
+| `string?` / `decimal?` | Null değer alabilen tür |
+| `value ?? fallback` | Değer null ise alternatif değeri kullanma |
+| `batch ??= new ...` | Parti null ise yeni nesne atama |
+| `condition ? a : b` | Koşula göre iki ifadeden birini seçme |
+| `value is { } number` | Değer null değilse onu değişkene bağlama |
+| `async` / `await` | Asenkron işlemin sonucunu, bağımlı adıma geçmeden bekleme |
+| `CancellationToken` | İptal isteğini okuma ve veritabanı işlemlerine iletme |
+| `using` / `await using` | Kaynağın kapsam sonunda temizlenmesini sağlama |
+| `IReadOnlyList<T>` | Koleksiyona okuma amaçlı erişim sağlayan arayüz |
+
+Bu tabloyu ezberlemek yerine her yapının kullanıldığı dosyada neden gerekli
+olduğunu açıklamayı dene. Çalışma sırası ve alıştırmalar için
+[demo ve görüşme belgesine](DEMO_VE_CALISMA.md) geçebilirsin.

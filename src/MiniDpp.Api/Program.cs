@@ -51,6 +51,7 @@ await using (var scope = app.Services.CreateAsyncScope())
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapImportEndpoints();
 app.MapDppEndpoints();
+app.MapHomeEndpoints();
 
 await app.RunAsync();
 

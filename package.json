@@ -1,0 +1,8 @@
+{
+  "name": "mini-dpp-web-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:web": "node tests/web/import-client.test.mjs"
+  }
+}
