@@ -9,8 +9,8 @@ Dosyaları aşağıdaki sırayla okuyabilirsin.
 Uygulama CSV'deki ürün bilgilerini doğrulayacak, geçerli kayıtları SQLite'a
 yazacak ve her GTIN için okunabilir HTML, JSON-LD ve PNG QR kodu sunacak.
 
-Şu anda tamamlanan kısım veritabanı ve alan doğrulamasıdır. Dosya yükleme ve
-pasaport endpoint'leri sonraki aşamalarda eklenecek.
+Şu anda veritabanı, alan doğrulaması ve CSV içe aktarma API'si tamamlandı.
+Pasaport endpoint'leri sonraki aşamada eklenecek.
 
 ## 2. Üç sınıf arasındaki ilişki
 
@@ -79,7 +79,8 @@ Dosya: [Program.cs](../src/MiniDpp.Api/Program.cs).
 7. `Build`, uygulamayı oluşturur.
 8. Başlangıçtaki scope içerisinde `MigrateAsync`, bekleyen migration'ları uygular.
 9. `MapGet`, `/health` adresinin cevabını tanımlar.
-10. `RunAsync`, sunucuyu çalıştırır.
+10. `MapImportEndpoints`, CSV yükleme endpoint'ini ekler.
+11. `RunAsync`, sunucuyu çalıştırır.
 
 **ÖNEMLİ:** Hizmet kayıtları `Build()` çağrısından önce yapılır.
 
@@ -204,7 +205,120 @@ Sayısal gösterim örnekleri:
 farklı girdilerle kontrol eder. `with`, record'un bir kopyasını belirtilen
 alanları değiştirerek oluşturur; testlerde tek bir hatayı izole etmeyi kolaylaştırır.
 
-## 10. Görüşmede açıklayabilmen gerekenler
+## 10. HTTP isteği uygulamaya nasıl giriyor?
+
+Dosya: [ImportEndpoints.cs](../src/MiniDpp.Api/Endpoints/ImportEndpoints.cs).
+
+`MapPost`, `POST /api/products/import` adresini tanımlar. Handler parametreleri:
+
+- `IFormFile? file`: İstekteki `file` adlı form alanından alınır.
+- `CsvImportService service`: Dependency injection tarafından sağlanır.
+- `CancellationToken`: İstek iptal edilirse devam eden işlerin iptalini iletir.
+
+Önce dosyanın varlığı ve boyutu kontrol edilir. Sonra UTF-8 olarak okunur.
+Geçersiz UTF-8, dosya hatasıdır; henüz hiçbir kayıt yazılmadan 400 döner.
+
+`StreamReader`, `new UTF8Encoding(false, true)` ile geçersiz bayt dizilerini
+sessizce değiştirmek yerine hata bildirir. Başlangıçtaki UTF-8 BOM'u CSV
+okuyucusu ayıklar.
+
+`Results.Ok(report)`, raporu JSON olarak döndürür. Dosya düzeyindeki sorunlar
+`Results.Problem` ile standart hata yanıtı olur. Satır hataları ise dosyanın
+geri kalanını işlemeyi engellemez ve başarılı işleme raporunda listelenir.
+
+`DisableAntiforgery`, hesap/cookie kimlik doğrulaması kullanmayan bu yerel
+demo yüklemesinde form token zorunluluğunu kaldırır.
+
+## 11. CSV okuyucusunun görevi
+
+Dosyalar: [CsvProductReader.cs](../src/MiniDpp.Api/Importing/CsvProductReader.cs),
+[CsvInputRow.cs](../src/MiniDpp.Api/Importing/CsvInputRow.cs).
+
+CsvHelper 34 kullanıyoruz. Bu sürümde ayarlar `CsvReaderOptions` üzerinden
+verilir; eski sürümlerin `CsvConfiguration` örnekleriyle API'si farklıdır.
+
+Okuyucu başlığı kontrol eder, sütunları isimlerinden eşleştirir ve her kaydı
+satır numarasıyla birlikte `CsvInputRow` olarak döndürür.
+
+**ÖNEMLİ:** `Split(',')`, tırnak içindeki virgülü de ayırır. CSV kütüphanesi
+tırnak, kaçırılmış tırnak ve çok satırlı alan sınırlarını doğru ele alır.
+
+**ÖNEMLİ:** `TrackLineNumbers = true` ve `LineNumber`, dosyadaki fiziksel
+satırı verir. Başlık 1'dir. `RowNumber` ise kütüphanenin başlığı saymayan veri
+kaydı sayısıdır; ödevin istediği satır numarası için onu kullanmıyoruz.
+
+`SkipEmptyLines = false`, boş bir veri satırının hata raporuna girmesini sağlar.
+Bozuk tırnaklı kayıt kurtarılabilse bile callback ile işaretlenir ve kaydedilmez.
+
+Kaynak: [CsvHelper okuyucu ayarları](https://joshclose.github.io/CsvHelper/api/csvreaderoptions.html).
+
+## 12. Kayıt hizmeti ve transaction
+
+Dosya: [CsvImportService.cs](../src/MiniDpp.Api/Importing/CsvImportService.cs).
+
+İçe aktarmanın akışı:
+
+1. CSV okuyucusu başlığı ve kayıt yapısını çözer.
+2. Yapısal hatalı satır doğrudan hata listesine eklenir.
+3. Diğer satır `ProductRowValidator` ile doğrulanır.
+4. Geçerli satır için transaction açılır.
+5. GTIN zaten varsa aynı bilgiler mi diye kontrol edilir.
+6. Yeni üründe mevcut model ve parti aranır; gerekiyorsa oluşturulur.
+7. `Products.Add`, ürün nesnesini ve yeni ilişkili nesneleri izlemeye alır.
+8. `SaveChangesAsync`, SQL komutlarını çalıştırır.
+9. `CommitAsync`, o satırın işlemini kalıcılaştırır.
+
+**ÖNEMLİ:** Transaction bütün dosya için açılmaz. Aynı satırın model, parti ve
+ürün değişiklikleri bir bütündür. Bir satır başarısızsa o satır geri alınır;
+daha önce başarıyla kaydedilen satırlar korunur.
+
+`await using`, commit edilmeden çıkılan transaction'ı dispose eder ve
+işlemin geri alınmasını sağlar. Kayıt hatası raporlandıktan sonra sonraki
+satırın işlenmesine devam edilir.
+
+**ÖNEMLİ:** Veritabanı işleminin geri alınması, EF Core'un bellekte izlediği
+nesneleri otomatik kaldırmaz. `finally` içindeki `ChangeTracker.Clear`,
+başarısız satırın nesnelerinin sonraki `SaveChanges` çağrısına taşınmasını önler.
+
+## 13. Aynı dosya neden tekrar tekrar ürün oluşturmuyor?
+
+GTIN sorgusu transaction içerisinde yapılır. `HasSameValues`, mevcut kaydı
+gelen model, parti, elyaf, yer ve karbon değerleriyle karşılaştırır.
+
+- Aynı bilgiler varsa kayıt değiştirilmeden `unchanged` olarak raporlanır.
+- Bilgiler farklıysa açıklayıcı bir satır hatası döner.
+- GTIN yoksa yeni ürün kaydedilir.
+
+Bu davranış aynı dosyanın tekrar gönderilmesini güvenli ve öngörülebilir yapar.
+Güncelleme ve sürüm geçmişi bonusunu eklemiyoruz; README bu kararı açıklar.
+
+`CsvImportReport`, toplam, yeni, değişmeyen ve reddedilen kayıt sayılarını;
+satır bazlı hataları ve kabul edilen ürünlerin temel kimlik bilgilerini taşır.
+
+## 14. Gerçek HTTP akışını nasıl test ediyoruz?
+
+Dosyalar: [MiniDppFactory.cs](../tests/MiniDpp.Tests/MiniDppFactory.cs),
+[CsvImportApiTests.cs](../tests/MiniDpp.Tests/CsvImportApiTests.cs),
+[CsvProductReaderTests.cs](../tests/MiniDpp.Tests/CsvProductReaderTests.cs).
+
+`WebApplicationFactory<Program>`, uygulamayı test sunucusunda başlatır.
+`CreateClient`, bu sunucuya HTTP isteği gönderen istemciyi oluşturur.
+Testler de kullanıcı gibi multipart form ile CSV dosyası gönderir.
+
+Her factory ayrı bir bellek içi SQLite bağlantısı kullanır. Aynı migration'lar
+bu veritabanına uygulanır; uygulamanın yerel dosyasına dokunulmaz.
+
+Önemli senaryolar:
+
+- İşverenin gerçek CSV dosyası yüklenir: 3 ürün, 4. ve 5. satırda hata.
+- Tekrar yükleme kayıt sayısını artırmaz.
+- Modeller ve partiler tekrar kullanılır.
+- Aynı GTIN farklı bilgilerle geldiğinde eski değerler korunur.
+- Teste özel SQLite trigger'ı bir ürün eklemesini bilerek başarısız yapar.
+  Model ve partinin de geri alındığı ve sonraki ürünün kaydedildiği doğrulanır.
+- Eksik dosya, hatalı başlık, fazla boyut ve geçersiz UTF-8 kontrol edilir.
+
+## 15. Görüşmede açıklayabilmen gerekenler
 
 - GTIN neden sayısal tür yerine metin olarak saklanıyor?
 - Model ve parti neden ayrı tablolar? Bağlantı hangi alanlarda tutuluyor?
@@ -214,3 +328,7 @@ alanları değiştirerek oluşturur; testlerde tek bir hatayı izole etmeyi kola
 - Sayılar neden `decimal` ve `InvariantCulture` ile okunuyor?
 - Yüzde toplamından önce neden aralık kontrolü yapılıyor?
 - Hatalı bir satırdan neden `ValidatedProduct` oluşturulmuyor?
+- Başlık 1 sayılırken CSV satır numarası nasıl doğru bulunuyor?
+- Bir satırın kayıt hatası neden bütün dosyayı geri almıyor?
+- Transaction geri alınınca neden `ChangeTracker.Clear` çağrılıyor?
+- Aynı GTIN tekrar veya farklı bilgilerle gelirse ne oluyor?

@@ -17,6 +17,9 @@
   <ItemGroup>
     <Using Include="Xunit" />
     <ProjectReference Include="../../src/MiniDpp.Api/MiniDpp.Api.csproj" />
+    <None Include="../../Assignment/urunler_duzeltilmis_test.csv"
+          Link="TestData/urunler_duzeltilmis_test.csv"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
