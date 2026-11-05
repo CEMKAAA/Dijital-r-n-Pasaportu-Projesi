@@ -480,3 +480,13 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# Yerel SQLite verileri ve doğrulama çıktıları
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+.artifacts/
+
+# Örnek CSV depoya eklenir; ödevin kaynak PDF'i yerelde tutulur.
+Assignment/*.pdf
